@@ -1,8 +1,6 @@
 import yfinance as yf
 from fastapi import FastAPI, UploadFile, File, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional, List
 from sqlalchemy.orm import Session
@@ -12,11 +10,10 @@ from datetime import datetime
 import io
 import csv
 
-from database import init_db, get_db, Ticker, Portfolio, Alert, Note, Settings
+from database import init_db, get_db, Ticker, Portfolio, Alert, Note, Settings, Transaction
 
 app = FastAPI(title="Pulse 4.0 Institutional Terminal")
 
-# CORS configuration for web access
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -25,7 +22,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize database on startup
 @app.on_event("startup")
 async def startup_event():
     init_db()
@@ -34,6 +30,13 @@ async def startup_event():
 class PositionModel(BaseModel):
     quantity: float = 0
     avg_price: float = 0
+
+class TransactionModel(BaseModel):
+    transaction_type: str  # 'BUY' or 'SELL'
+    quantity: float
+    price: float
+    date: Optional[str] = None
+    notes: Optional[str] = ""
 
 class TickerModel(BaseModel):
     symbol: str
@@ -59,7 +62,6 @@ def get_pct_change(series, days):
         return 0
 
 def format_earnings_date(earnings_date):
-    """Format earnings date to readable string"""
     try:
         if isinstance(earnings_date, (int, float)):
             dt = datetime.fromtimestamp(earnings_date)
@@ -85,7 +87,6 @@ def format_earnings_date(earnings_date):
         return None
 
 def fetch_news_enhanced(symbol):
-    """Enhanced news fetching"""
     news_items = []
     try:
         t = yf.Ticker(symbol)
@@ -126,47 +127,38 @@ def fetch_news_enhanced(symbol):
                         "thumbnail": thumbnail
                     })
                 except Exception as e:
-                    print(f"Error parsing news item: {e}")
                     continue
-    except Exception as e:
-        print(f"Error fetching news for {symbol}: {e}")
+        except:
+            pass
     
     if not news_items:
         news_items = [
-            {
-                "title": f"Latest {symbol} News & Analysis",
-                "link": f"https://news.google.com/search?q={symbol}+stock",
-                "publisher": "Google News",
-                "published": "Live",
-                "thumbnail": ""
-            },
-            {
-                "title": f"{symbol} Stock Analysis & Research",
-                "link": f"https://www.marketwatch.com/investing/stock/{symbol.lower()}",
-                "publisher": "MarketWatch", 
-                "published": "Live",
-                "thumbnail": ""
-            },
-            {
-                "title": f"{symbol} Financial Statements",
-                "link": f"https://finance.yahoo.com/quote/{symbol}/financials",
-                "publisher": "Yahoo Finance",
-                "published": "Live",
-                "thumbnail": ""
-            }
+            {"title": f"Latest {symbol} News", "link": f"https://news.google.com/search?q={symbol}+stock", "publisher": "Google News", "published": "Live", "thumbnail": ""},
+            {"title": f"{symbol} Analysis", "link": f"https://www.marketwatch.com/investing/stock/{symbol.lower()}", "publisher": "MarketWatch", "published": "Live", "thumbnail": ""}
         ]
     return news_items
 
-@app.get("/")
-async def read_root():
-    """Serve the main HTML file"""
-    return FileResponse("index.html")
+def calculate_portfolio_from_transactions(symbol: str, db: Session):
+    """Calculate portfolio stats from transaction history"""
+    buys = db.query(Transaction).filter_by(symbol=symbol, transaction_type='BUY').all()
+    sells = db.query(Transaction).filter_by(symbol=symbol, transaction_type='SELL').all()
+    
+    total_bought = sum(t.quantity for t in buys)
+    total_sold = sum(t.quantity for t in sells)
+    current_qty = total_bought - total_sold
+    
+    if current_qty <= 0:
+        return {'quantity': 0, 'avg_price': 0}
+    
+    # Calculate weighted average
+    cost = sum(t.quantity * t.price for t in buys) - sum(t.quantity * t.price for t in sells)
+    avg_price = cost / current_qty if current_qty > 0 else 0
+    
+    return {'quantity': round(current_qty, 4), 'avg_price': round(avg_price, 2)}
 
 @app.get("/api/screener")
 def get_screener(db: Session = Depends(get_db)):
-    """Get all stocks with their data"""
     results = []
-    
     tickers = db.query(Ticker).all()
     
     for ticker in tickers:
@@ -178,7 +170,6 @@ def get_screener(db: Session = Depends(get_db)):
             hist = t.history(period="5y")
             
             if hist.empty or len(hist) < 50:
-                print(f"Skipping {symbol}: insufficient data")
                 continue
                 
             close = hist['Close']
@@ -191,12 +182,10 @@ def get_screener(db: Session = Depends(get_db)):
             except:
                 pass
             
-            # Calculate moving averages
             ma50 = close.rolling(50).mean().iloc[-1]
             ma100 = close.rolling(100).mean().iloc[-1]
             ma250 = close.rolling(250).mean().iloc[-1]
             
-            # Calculate RSI
             try:
                 delta = close.diff()
                 gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
@@ -207,28 +196,20 @@ def get_screener(db: Session = Depends(get_db)):
             except:
                 rsi = '—'
             
-            # Average volume
             avg_volume = volume.tail(20).mean() if len(volume) >= 20 else volume.mean()
-            
-            # Volatility
             returns = close.pct_change().dropna()
             volatility = returns.std() * np.sqrt(252) * 100
             
-            # Portfolio
-            pos = db.query(Portfolio).filter_by(symbol=symbol).first()
-            if pos:
-                quantity = pos.quantity
-                avg_price = pos.avg_price
-            else:
-                quantity = 0
-                avg_price = 0
+            # Calculate from transactions
+            pos_data = calculate_portfolio_from_transactions(symbol, db)
+            quantity = pos_data['quantity']
+            avg_price = pos_data['avg_price']
             
             total_value = quantity * current_price
             cost_basis = quantity * avg_price
             pnl = total_value - cost_basis if quantity > 0 else 0
             pnl_pct = round((pnl / cost_basis) * 100, 2) if cost_basis > 0 else 0
             
-            # Alerts
             alert = db.query(Alert).filter_by(symbol=symbol).first()
             alert_data = {}
             alert_triggered = False
@@ -242,19 +223,15 @@ def get_screener(db: Session = Depends(get_db)):
                     if current_price <= alert.low:
                         alert_triggered = True
             
-            # Earnings date
             earnings_date_display = None
             try:
                 if 'earningsDate' in info and info['earningsDate']:
                     earnings_date = info['earningsDate']
                     if isinstance(earnings_date, list) and len(earnings_date) > 0:
                         earnings_date_display = format_earnings_date(earnings_date[0])
-                    else:
-                        earnings_date_display = format_earnings_date(earnings_date)
             except:
                 pass
             
-            # Market cap
             market_cap = info.get('marketCap', 0)
             if market_cap >= 1e12:
                 market_cap_display = f"${market_cap/1e12:.2f}T"
@@ -265,14 +242,9 @@ def get_screener(db: Session = Depends(get_db)):
             else:
                 market_cap_display = "—"
             
-            # Dividend yield
             dividend_yield = info.get('dividendYield', 0)
-            if dividend_yield and dividend_yield > 0:
-                dividend_yield_display = round(dividend_yield * 100, 2)
-            else:
-                dividend_yield_display = 0
+            dividend_yield_display = round(dividend_yield * 100, 2) if dividend_yield and dividend_yield > 0 else 0
             
-            # Notes
             note = db.query(Note).filter_by(symbol=symbol).first()
             notes_text = note.content if note else ""
             
@@ -320,16 +292,14 @@ def get_screener(db: Session = Depends(get_db)):
                 "alert_triggered": alert_triggered,
                 "notes": notes_text
             })
-            print(f"✓ Processed {symbol}")
         except Exception as e:
-            print(f"✗ Error processing {symbol}: {e}")
+            print(f"Error: {symbol}: {e}")
             continue
     
     return results
 
 @app.get("/api/categories")
 def get_categories(db: Session = Depends(get_db)):
-    """Get all unique categories"""
     tickers = db.query(Ticker).all()
     categories = list(set([t.category for t in tickers]))
     categories.sort()
@@ -337,7 +307,6 @@ def get_categories(db: Session = Depends(get_db)):
 
 @app.get("/api/details/{symbol}")
 def get_details(symbol: str):
-    """Get detailed info for a symbol"""
     try:
         t = yf.Ticker(symbol)
         summary = "No summary available."
@@ -353,7 +322,6 @@ def get_details(symbol: str):
 
 @app.post("/api/add")
 def add_ticker(data: TickerModel, db: Session = Depends(get_db)):
-    """Add a new ticker"""
     symbol_up = data.symbol.upper().strip()
     if not symbol_up:
         return {"status": "error", "message": "Empty symbol"}
@@ -370,42 +338,74 @@ def add_ticker(data: TickerModel, db: Session = Depends(get_db)):
 
 @app.delete("/api/ticker/{symbol}")
 def delete_ticker(symbol: str, db: Session = Depends(get_db)):
-    """Delete a ticker"""
     symbol_up = symbol.upper()
     
     ticker = db.query(Ticker).filter_by(symbol=symbol_up).first()
     if ticker:
         db.delete(ticker)
-        
-        # Delete related data
         db.query(Portfolio).filter_by(symbol=symbol_up).delete()
         db.query(Alert).filter_by(symbol=symbol_up).delete()
         db.query(Note).filter_by(symbol=symbol_up).delete()
-        
+        db.query(Transaction).filter_by(symbol=symbol_up).delete()
         db.commit()
         return {"status": "deleted"}
     
     return {"status": "not_found"}
 
-@app.post("/api/portfolio/{symbol}")
-def update_position(symbol: str, position: PositionModel, db: Session = Depends(get_db)):
-    """Update portfolio position"""
+@app.post("/api/transaction/{symbol}")
+def add_transaction(symbol: str, transaction: TransactionModel, db: Session = Depends(get_db)):
+    """Add a buy/sell transaction"""
     symbol_up = symbol.upper()
     
-    pos = db.query(Portfolio).filter_by(symbol=symbol_up).first()
-    if pos:
-        pos.quantity = position.quantity
-        pos.avg_price = position.avg_price
-    else:
-        pos = Portfolio(symbol=symbol_up, quantity=position.quantity, avg_price=position.avg_price)
-        db.add(pos)
+    # Parse date
+    trans_date = datetime.now()
+    if transaction.date:
+        try:
+            trans_date = datetime.fromisoformat(transaction.date)
+        except:
+            pass
     
+    new_trans = Transaction(
+        symbol=symbol_up,
+        transaction_type=transaction.transaction_type.upper(),
+        quantity=transaction.quantity,
+        price=transaction.price,
+        date=trans_date,
+        notes=transaction.notes or ""
+    )
+    db.add(new_trans)
     db.commit()
+    
     return {"status": "saved"}
+
+@app.get("/api/transactions/{symbol}")
+def get_transactions(symbol: str, db: Session = Depends(get_db)):
+    """Get transaction history for a symbol"""
+    symbol_up = symbol.upper()
+    transactions = db.query(Transaction).filter_by(symbol=symbol_up).order_by(Transaction.date.desc()).all()
+    
+    return [{
+        "id": t.id,
+        "type": t.transaction_type,
+        "quantity": t.quantity,
+        "price": t.price,
+        "date": t.date.strftime('%Y-%m-%d'),
+        "total": round(t.quantity * t.price, 2),
+        "notes": t.notes
+    } for t in transactions]
+
+@app.delete("/api/transaction/{trans_id}")
+def delete_transaction(trans_id: int, db: Session = Depends(get_db)):
+    """Delete a transaction"""
+    transaction = db.query(Transaction).filter_by(id=trans_id).first()
+    if transaction:
+        db.delete(transaction)
+        db.commit()
+        return {"status": "deleted"}
+    return {"status": "not_found"}
 
 @app.post("/api/alerts/{symbol}")
 def update_alerts(symbol: str, alert_data: AlertModel, db: Session = Depends(get_db)):
-    """Update price alerts"""
     symbol_up = symbol.upper()
     
     alert = db.query(Alert).filter_by(symbol=symbol_up).first()
@@ -421,7 +421,6 @@ def update_alerts(symbol: str, alert_data: AlertModel, db: Session = Depends(get
 
 @app.post("/api/notes/{symbol}")
 def update_notes(symbol: str, note_data: NoteModel, db: Session = Depends(get_db)):
-    """Update notes"""
     symbol_up = symbol.upper()
     
     note = db.query(Note).filter_by(symbol=symbol_up).first()
@@ -436,7 +435,6 @@ def update_notes(symbol: str, note_data: NoteModel, db: Session = Depends(get_db
 
 @app.get("/api/theme")
 def get_theme(db: Session = Depends(get_db)):
-    """Get theme setting"""
     setting = db.query(Settings).filter_by(key='theme').first()
     if setting:
         return {"theme": setting.value}
@@ -444,7 +442,6 @@ def get_theme(db: Session = Depends(get_db)):
 
 @app.post("/api/theme")
 def set_theme(theme: str, db: Session = Depends(get_db)):
-    """Set theme"""
     setting = db.query(Settings).filter_by(key='theme').first()
     if setting:
         setting.value = theme
@@ -457,7 +454,6 @@ def set_theme(theme: str, db: Session = Depends(get_db)):
 
 @app.get("/api/export")
 def export_watchlist(db: Session = Depends(get_db)):
-    """Export all data as CSV"""
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(['Symbol', 'Category', 'Quantity', 'Avg_Price', 'Alert_High', 'Alert_Low', 'Notes'])
@@ -465,15 +461,15 @@ def export_watchlist(db: Session = Depends(get_db)):
     tickers = db.query(Ticker).all()
     
     for t in tickers:
-        pos = db.query(Portfolio).filter_by(symbol=t.symbol).first()
+        pos_data = calculate_portfolio_from_transactions(t.symbol, db)
         alert = db.query(Alert).filter_by(symbol=t.symbol).first()
         note = db.query(Note).filter_by(symbol=t.symbol).first()
         
         writer.writerow([
             t.symbol,
             t.category,
-            pos.quantity if pos else 0,
-            pos.avg_price if pos else 0,
+            pos_data['quantity'],
+            pos_data['avg_price'],
             alert.high if alert else '',
             alert.low if alert else '',
             note.content if note else ''
@@ -484,7 +480,6 @@ def export_watchlist(db: Session = Depends(get_db)):
 
 @app.post("/api/import")
 async def import_watchlist(file: UploadFile = File(...), db: Session = Depends(get_db)):
-    """Import data from CSV"""
     contents = await file.read()
     decoded = contents.decode('utf-8')
     reader = csv.DictReader(io.StringIO(decoded))
@@ -502,13 +497,11 @@ async def import_watchlist(file: UploadFile = File(...), db: Session = Depends(g
                 imported += 1
             
             if row.get('Quantity') and row.get('Avg_Price'):
-                pos = db.query(Portfolio).filter_by(symbol=symbol).first()
-                if pos:
-                    pos.quantity = float(row['Quantity'])
-                    pos.avg_price = float(row['Avg_Price'])
-                else:
-                    pos = Portfolio(symbol=symbol, quantity=float(row['Quantity']), avg_price=float(row['Avg_Price']))
-                    db.add(pos)
+                qty = float(row['Quantity'])
+                price = float(row['Avg_Price'])
+                if qty > 0:
+                    trans = Transaction(symbol=symbol, transaction_type='BUY', quantity=qty, price=price, date=datetime.now())
+                    db.add(trans)
             
             if row.get('Alert_High') or row.get('Alert_Low'):
                 alert = db.query(Alert).filter_by(symbol=symbol).first()
@@ -534,7 +527,7 @@ async def import_watchlist(file: UploadFile = File(...), db: Session = Depends(g
                     db.add(note)
                     
         except Exception as e:
-            print(f"Import error for row {row}: {e}")
+            print(f"Import error: {e}")
             continue
     
     db.commit()
