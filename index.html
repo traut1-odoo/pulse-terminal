@@ -1026,22 +1026,6 @@
                         console.error('Error deleting transaction:', e);
                     }
                 },
-                        });
-                        const result = await res.json();
-                        console.log('Notes result:', result);
-                        
-                        await this.fetchData();
-                        const updated = this.stocks.find(s => s.symbol === this.activeStock.symbol);
-                        if(updated) {
-                            this.activeStock = updated;
-                            this.tempNotes = updated.notes || '';
-                        }
-                        alert('Notes saved successfully!');
-                    } catch (e) {
-                        console.error('Error saving notes:', e);
-                        alert('Failed to save notes');
-                    }
-                },
 
                 async exportCSV() {
                     const res = await fetch(this.apiBase + '/api/export');
