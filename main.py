@@ -1,6 +1,7 @@
 import yfinance as yf
 from fastapi import FastAPI, UploadFile, File, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional, List
 from sqlalchemy.orm import Session
@@ -26,6 +27,11 @@ app.add_middleware(
 async def startup_event():
     init_db()
     print("✅ Database initialized")
+
+@app.get("/")
+async def read_root():
+    """Serve the main HTML file"""
+    return FileResponse("index.html")
 
 class PositionModel(BaseModel):
     quantity: float = 0
