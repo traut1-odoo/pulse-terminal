@@ -11,7 +11,7 @@ from datetime import datetime
 import io
 import csv
 
-from database import init_db, get_db, Ticker, Portfolio, Alert, Note, Settings
+from database import init_db, get_db, Ticker, Portfolio, Alert, Note, Settings, Transaction
 
 app = FastAPI(title="Pulse 4.0 Institutional Terminal")
 
@@ -308,6 +308,10 @@ def get_screener(db: Session = Depends(get_db)):
 def get_categories(db: Session = Depends(get_db)):
     tickers = db.query(Ticker).all()
     categories = list(set([t.category for t in tickers]))
+    # Always include default categories
+    for default_cat in ["Long Term", "Short Term"]:
+        if default_cat not in categories:
+            categories.append(default_cat)
     categories.sort()
     return ["All"] + categories
 
