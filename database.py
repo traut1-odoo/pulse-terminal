@@ -1,6 +1,7 @@
-from sqlalchemy import create_engine, Column, String, Float, Integer, Text, JSON
+from sqlalchemy import create_engine, Column, String, Float, Integer, Text, JSON, DateTime
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+from datetime import datetime
 import os
 
 Base = declarative_base()
@@ -19,6 +20,18 @@ class Portfolio(Base):
     symbol = Column(String(10), unique=True, nullable=False)
     quantity = Column(Float, default=0)
     avg_price = Column(Float, default=0)
+
+class Transaction(Base):
+    """Transaction history for portfolio tracking"""
+    __tablename__ = 'transactions'
+    
+    id = Column(Integer, primary_key=True)
+    symbol = Column(String(10), nullable=False)
+    transaction_type = Column(String(10), nullable=False)  # 'BUY' or 'SELL'
+    quantity = Column(Float, nullable=False)
+    price = Column(Float, nullable=False)
+    date = Column(DateTime, default=datetime.utcnow)
+    notes = Column(Text, default='')
 
 class Alert(Base):
     __tablename__ = 'alerts'
