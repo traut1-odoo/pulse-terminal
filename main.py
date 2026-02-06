@@ -128,8 +128,8 @@ def fetch_news_enhanced(symbol):
                     })
                 except Exception as e:
                     continue
-        except:
-            pass
+    except:
+        pass
     
     if not news_items:
         news_items = [
