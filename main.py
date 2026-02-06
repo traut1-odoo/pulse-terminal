@@ -11,7 +11,7 @@ from datetime import datetime
 import io
 import csv
 
-from database import init_db, get_db, Ticker, Portfolio, Alert, Note, Settings, Transaction
+from database import init_db, get_db, Ticker, Portfolio, Alert, Note, Settings
 
 app = FastAPI(title="Pulse 4.0 Institutional Terminal")
 
