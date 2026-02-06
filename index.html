@@ -1,0 +1,975 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <title>Pulse 4.0 | Institutional Terminal</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        slate: { 950: '#020617' }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        [x-cloak] { display: none !important; }
+        
+        /* Enhanced Tooltip Styles */
+        .tooltip-container { position: relative; display: inline-block; }
+        .tooltip-trigger { cursor: help; border-bottom: 1px dotted #64748b; }
+        .tooltip-box { 
+            display: none; 
+            position: fixed; 
+            z-index: 99999; 
+            width: 320px; 
+            padding: 18px; 
+            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); 
+            border: 2px solid #3b82f6; 
+            border-radius: 12px; 
+            color: #f8fafc; 
+            font-size: 13px; 
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.9); 
+            line-height: 1.6;
+            pointer-events: none;
+        }
+        .tooltip-container:hover .tooltip-box { 
+            display: block; 
+            animation: tooltipFade 0.3s ease-in; 
+        }
+        @keyframes tooltipFade { from { opacity: 0; transform: translateX(-50%) translateY(5px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
+        
+        .tooltip-title { color: #60a5fa; font-weight: bold; margin-bottom: 8px; font-size: 13px; }
+        .tooltip-section { margin-top: 10px; padding-top: 10px; border-top: 1px solid #334155; }
+        .tooltip-label { color: #94a3b8; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+        .tooltip-value { color: #e2e8f0; margin-top: 2px; }
+        .range-good { color: #10b981; }
+        .range-bad { color: #ef4444; }
+        .range-neutral { color: #f59e0b; }
+        
+        tr:hover .delete-btn { opacity: 1; }
+        tr:hover .note-btn { opacity: 1; }
+        .alert-flash { animation: flash 2s infinite; }
+        @keyframes flash { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+        
+        .light-mode { background-color: #f1f5f9; color: #1e293b; }
+        .light-mode .bg-\\[\\#020617\\] { background-color: #ffffff; }
+        .light-mode .text-white { color: #0f172a; }
+        .light-mode .text-slate-300 { color: #334155; }
+        .light-mode .bg-white\\/5 { background-color: rgba(0,0,0,0.05); }
+        .light-mode .border-white\\/5 { border-color: rgba(0,0,0,0.1); }
+        .light-mode .tooltip-box { background: linear-gradient(135deg, #e2e8f0 0%, #cbd5e1 100%); color: #0f172a; border-color: #94a3b8; }
+        
+        /* Column sorting indicator */
+        .sortable { cursor: pointer; user-select: none; }
+        .sortable:hover { color: #60a5fa; }
+        .sort-icon { display: inline-block; margin-left: 4px; font-size: 10px; opacity: 0.5; }
+        
+        /* News thumbnail */
+        .news-thumbnail { width: 60px; height: 60px; object-fit: cover; border-radius: 8px; }
+        
+        /* Enhanced card hover effects */
+        .hover-lift { transition: transform 0.2s, box-shadow 0.2s; }
+        .hover-lift:hover { transform: translateY(-2px); box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3); }
+        
+        /* Chart container improvement */
+        #tv_chart { position: relative; }
+        .chart-overlay { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #64748b; font-size: 14px; }
+    </style>
+</head>
+<body class="bg-[#020617] text-slate-300 font-sans transition-colors duration-300" x-data="pulseApp()" x-init="init()" :class="{'light-mode': theme === 'light'}">
+
+    <div class="flex h-screen overflow-hidden">
+        <!-- SIDEBAR -->
+        <aside class="w-64 border-r border-white/5 p-6 flex flex-col bg-[#020617]/50 backdrop-blur-xl">
+            <div class="flex justify-between items-center mb-8">
+                <h1 class="text-white font-black text-xl italic">PULSE<span class="text-blue-500 text-xs ml-1">4.0</span></h1>
+                <button @click="toggleTheme()" class="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-xs transition">
+                    <span x-show="theme === 'dark'">☀️</span>
+                    <span x-show="theme === 'light'">🌙</span>
+                </button>
+            </div>
+            
+            <!-- Categories -->
+            <nav class="flex-1 space-y-1 overflow-y-auto mb-4">
+                <template x-for="cat in categories">
+                    <button @click="filter = cat" :class="filter === cat ? 'bg-blue-600/20 text-blue-400 border-l-2 border-blue-500' : 'text-slate-500 hover:text-slate-300 border-l-2 border-transparent'" class="w-full text-left p-3 rounded-r-lg font-bold transition flex justify-between items-center group">
+                        <span x-text="cat"></span>
+                        <div class="flex items-center gap-2">
+                            <span x-show="cat !== 'All'" class="text-[9px] bg-white/10 px-1.5 py-0.5 rounded" x-text="getCategoryCount(cat)"></span>
+                            <span x-show="cat !== 'All' && cat !== 'Long Term' && cat !== 'Short Term'" class="text-[9px] opacity-0 group-hover:opacity-100 hover:text-rose-400 transition" @click.stop="deleteCategory(cat)">✕</span>
+                        </div>
+                    </button>
+                </template>
+            </nav>
+            
+            <!-- Portfolio Mode Toggle -->
+            <div class="mb-4 p-3 bg-white/5 rounded-lg border border-white/5 hover-lift">
+                <label class="flex items-center justify-between cursor-pointer">
+                    <span class="text-xs font-bold text-slate-400">Portfolio Mode</span>
+                    <input type="checkbox" x-model="portfolioMode" class="sr-only peer">
+                    <div class="relative w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                </label>
+            </div>
+
+            <!-- Export/Import -->
+            <div class="flex gap-2 mb-4">
+                <button @click="exportCSV()" class="flex-1 bg-white/5 hover:bg-white/10 py-2 rounded text-[10px] font-bold transition hover-lift">📊 Export</button>
+                <label class="flex-1 bg-white/5 hover:bg-white/10 py-2 rounded text-[10px] font-bold transition cursor-pointer text-center hover-lift">
+                    📥 Import
+                    <input type="file" @change="importCSV($event)" accept=".csv" class="hidden">
+                </label>
+            </div>
+            
+            <!-- Add Ticker Section -->
+            <div class="pt-4 border-t border-white/5 space-y-2">
+                <input x-model="newTicker" @keyup.enter="addTicker()" placeholder="Symbol (e.g. TSLA)" class="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-sm outline-none focus:border-blue-500 text-white uppercase transition">
+                <select x-model="newCategory" class="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-sm outline-none focus:border-blue-500 text-white transition">
+                    <template x-for="cat in categories.filter(c => c !== 'All')">
+                        <option :value="cat" x-text="cat"></option>
+                    </template>
+                    <option value="___new___">+ New Category...</option>
+                </select>
+                <input x-show="newCategory === '___new___'" x-model="customCategory" placeholder="New Category Name" class="w-full bg-white/5 border border-white/10 rounded-lg p-2 text-sm outline-none focus:border-blue-500 text-white transition">
+                <button @click="addTicker()" class="w-full bg-blue-600 hover:bg-blue-500 p-2 rounded-lg text-white font-bold text-xs transition hover-lift">ADD ASSET</button>
+            </div>
+        </aside>
+
+        <!-- MAIN CONTENT -->
+        <main class="flex-1 overflow-x-auto p-6">
+            <div class="flex justify-between items-end mb-6">
+                <div>
+                    <h2 class="text-4xl font-black text-white tracking-tight" x-text="filter"></h2>
+                    <p class="text-[10px] text-slate-500 mt-1">
+                        <span x-show="lastUpdate">Last updated: <span x-text="lastUpdate"></span></span>
+                        <span class="mx-2">•</span>
+                        <span x-text="filteredStocks.length + ' assets'"></span>
+                    </p>
+                </div>
+                <div class="flex items-center gap-4">
+                    <div class="flex items-center gap-2 px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-full">
+                        <span class="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
+                        <span class="text-[10px] text-emerald-400 font-bold uppercase">Live Data</span>
+                    </div>
+                    <button @click="fetchData()" :disabled="loading" class="p-2 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition disabled:opacity-50">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" :class="{'animate-spin': loading}" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Main Table -->
+            <div class="bg-white/[0.02] border border-white/5 rounded-2xl overflow-hidden backdrop-blur-sm">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-[11px]">
+                        <thead class="uppercase tracking-tighter text-slate-500 border-b border-white/5 bg-white/[0.01]">
+                            <tr>
+                                <th class="p-4">
+                                    <div class="tooltip-container">
+                                        <span class="tooltip-trigger sortable" @click="sortBy('symbol')">
+                                            Asset<span class="sort-icon">⇅</span>
+                                        </span>
+                                        <div class="tooltip-box">
+                                            <div class="tooltip-title">Stock Symbol</div>
+                                            <div class="tooltip-value">Ticker symbol of the company</div>
+                                            <div class="tooltip-section">
+                                                <div class="tooltip-label">Actions</div>
+                                                <div class="tooltip-value">• Click row for details<br>• Click ↗ for Google Finance<br>• Click ✕ to remove</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </th>
+                                <th class="p-4">
+                                    <div class="tooltip-container">
+                                        <span class="tooltip-trigger sortable" @click="sortBy('price')">
+                                            Price<span class="sort-icon">⇅</span>
+                                        </span>
+                                        <div class="tooltip-box">
+                                            <div class="tooltip-title">Current Price</div>
+                                            <div class="tooltip-value">Latest trading price in USD</div>
+                                            <div class="tooltip-section">
+                                                <div class="tooltip-label">Updates</div>
+                                                <div class="tooltip-value">Real-time during market hours<br>15-min delay after hours</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </th>
+                                <th class="p-4">
+                                    <div class="tooltip-container">
+                                        <span class="tooltip-trigger text-emerald-500 sortable" @click="sortBy('1d')">
+                                            1D%<span class="sort-icon">⇅</span>
+                                        </span>
+                                        <div class="tooltip-box">
+                                            <div class="tooltip-title">1-Day % Change</div>
+                                            <div class="tooltip-value">Price change from previous close</div>
+                                            <div class="tooltip-section">
+                                                <div class="tooltip-label">Interpretation</div>
+                                                <div class="range-good">✓ Positive = Price increased</div>
+                                                <div class="range-bad">✗ Negative = Price decreased</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </th>
+                                <th class="p-4">
+                                    <div class="tooltip-container">
+                                        <span class="tooltip-trigger sortable" @click="sortBy('ma50')">
+                                            MA50<span class="sort-icon">⇅</span>
+                                        </span>
+                                        <div class="tooltip-box">
+                                            <div class="tooltip-title">50-Day Moving Average</div>
+                                            <div class="tooltip-value">Average price over last 50 trading days</div>
+                                            <div class="tooltip-section">
+                                                <div class="tooltip-label">Trading Signal</div>
+                                                <div class="range-good">✓ Price > MA50 = Short-term uptrend</div>
+                                                <div class="range-bad">✗ Price < MA50 = Short-term downtrend</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </th>
+                                <th class="p-4">
+                                    <div class="tooltip-container">
+                                        <span class="tooltip-trigger sortable" @click="sortBy('ma100')">
+                                            MA100<span class="sort-icon">⇅</span>
+                                        </span>
+                                        <div class="tooltip-box">
+                                            <div class="tooltip-title">100-Day Moving Average</div>
+                                            <div class="tooltip-value">Average price over last 100 trading days</div>
+                                            <div class="tooltip-section">
+                                                <div class="tooltip-label">Trading Signal</div>
+                                                <div class="range-good">✓ Price > MA100 = Medium-term uptrend</div>
+                                                <div class="range-bad">✗ Price < MA100 = Medium-term downtrend</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </th>
+                                <th class="p-4">
+                                    <div class="tooltip-container">
+                                        <span class="tooltip-trigger sortable" @click="sortBy('ma250')">
+                                            MA250<span class="sort-icon">⇅</span>
+                                        </span>
+                                        <div class="tooltip-box">
+                                            <div class="tooltip-title">250-Day Moving Average</div>
+                                            <div class="tooltip-value">Average price over last 250 trading days (~1 year)</div>
+                                            <div class="tooltip-section">
+                                                <div class="tooltip-label">Trading Signal</div>
+                                                <div class="range-good">✓ Price > MA250 = Long-term uptrend (BULLISH)</div>
+                                                <div class="range-bad">✗ Price < MA250 = Long-term downtrend (BEARISH)</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </th>
+                                <th class="p-4">
+                                    <div class="tooltip-container">
+                                        <span class="tooltip-trigger sortable" @click="sortBy('beta')">
+                                            Beta<span class="sort-icon">⇅</span>
+                                        </span>
+                                        <div class="tooltip-box">
+                                            <div class="tooltip-title">Beta Coefficient</div>
+                                            <div class="tooltip-value">Measures stock volatility vs market (S&P 500)</div>
+                                            <div class="tooltip-section">
+                                                <div class="tooltip-label">Interpretation</div>
+                                                <div class="range-good">• Beta = 1.0: Moves with market</div>
+                                                <div class="range-neutral">• Beta > 1.0: More volatile</div>
+                                                <div class="range-good">• Beta < 1.0: Less volatile</div>
+                                                <div class="range-bad">• Beta < 0: Inverse to market</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </th>
+                                <th class="p-4">
+                                    <div class="tooltip-container">
+                                        <span class="tooltip-trigger sortable" @click="sortBy('1m')">
+                                            1M%<span class="sort-icon">⇅</span>
+                                        </span>
+                                        <div class="tooltip-box">
+                                            <div class="tooltip-title">1-Month Performance</div>
+                                            <div class="tooltip-value">Price change over last 21 trading days</div>
+                                        </div>
+                                    </div>
+                                </th>
+                                <th class="p-4">
+                                    <div class="tooltip-container">
+                                        <span class="tooltip-trigger sortable" @click="sortBy('3m')">
+                                            3M%<span class="sort-icon">⇅</span>
+                                        </span>
+                                        <div class="tooltip-box">
+                                            <div class="tooltip-title">3-Month Performance</div>
+                                            <div class="tooltip-value">Price change over last 63 trading days</div>
+                                        </div>
+                                    </div>
+                                </th>
+                                <th class="p-4">
+                                    <div class="tooltip-container">
+                                        <span class="tooltip-trigger sortable" @click="sortBy('1y')">
+                                            1Y%<span class="sort-icon">⇅</span>
+                                        </span>
+                                        <div class="tooltip-box">
+                                            <div class="tooltip-title">1-Year Performance</div>
+                                            <div class="tooltip-value">Price change over last 252 trading days</div>
+                                        </div>
+                                    </div>
+                                </th>
+                                <th class="p-4">
+                                    <div class="tooltip-container">
+                                        <span class="tooltip-trigger text-blue-300 sortable" @click="sortBy('3y')">
+                                            3Y%<span class="sort-icon">⇅</span>
+                                        </span>
+                                        <div class="tooltip-box">
+                                            <div class="tooltip-title">3-Year Performance</div>
+                                            <div class="tooltip-value">Price change over last 3 years</div>
+                                            <div class="tooltip-section">
+                                                <div class="tooltip-label">Investment Horizon</div>
+                                                <div class="tooltip-value">Best indicator for long-term holdings</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </th>
+                                <th class="p-4">
+                                    <div class="tooltip-container">
+                                        <span class="tooltip-trigger sortable" @click="sortBy('pe')">
+                                            P/E<span class="sort-icon">⇅</span>
+                                        </span>
+                                        <div class="tooltip-box">
+                                            <div class="tooltip-title">Price-to-Earnings Ratio</div>
+                                            <div class="tooltip-value">Stock price ÷ Earnings per share</div>
+                                            <div class="tooltip-section">
+                                                <div class="tooltip-label">Valuation Guide</div>
+                                                <div class="range-bad">• P/E > 30: Potentially overvalued</div>
+                                                <div class="range-good">• P/E 15-25: Fair value</div>
+                                                <div class="range-good">• P/E < 15: Potentially undervalued</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </th>
+                                <th class="p-4">
+                                    <div class="tooltip-container">
+                                        <span class="tooltip-trigger sortable" @click="sortBy('rsi')">
+                                            RSI<span class="sort-icon">⇅</span>
+                                        </span>
+                                        <div class="tooltip-box">
+                                            <div class="tooltip-title">Relative Strength Index</div>
+                                            <div class="tooltip-value">Momentum indicator (0-100)</div>
+                                            <div class="tooltip-section">
+                                                <div class="tooltip-label">Trading Signals</div>
+                                                <div class="range-bad">• RSI > 70: Overbought (sell signal)</div>
+                                                <div class="range-good">• RSI 30-70: Neutral zone</div>
+                                                <div class="range-good">• RSI < 30: Oversold (buy signal)</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </th>
+                                <th x-show="portfolioMode" class="p-4">Position</th>
+                                <th x-show="portfolioMode" class="p-4">P&L</th>
+                                <th class="p-4">Sector</th>
+                                <th class="p-4">Sentiment</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-white/5 font-mono">
+                            <template x-for="s in sortedStocks" :key="s.symbol">
+                                <tr @click="openDeepDive(s)" :class="{'bg-yellow-500/10 border-l-2 border-yellow-500': s.alert_triggered}" class="hover:bg-blue-500/10 cursor-pointer transition group">
+                                    <td class="p-4">
+                                        <div class="flex items-center gap-2">
+                                            <span x-show="s.alert_triggered" class="text-yellow-500 text-xs animate-pulse">🔔</span>
+                                            <span x-show="s.notes" class="text-blue-400 text-xs">📝</span>
+                                            <span class="font-bold text-white text-sm" x-text="s.symbol"></span>
+                                            <a :href="'https://www.google.com/finance/quote/' + s.symbol + ':NASDAQ'" target="_blank" @click.stop class="text-slate-600 hover:text-blue-400 text-xs opacity-0 group-hover:opacity-100 transition">↗</a>
+                                            <button @click.stop="deleteTicker(s.symbol)" class="delete-btn opacity-0 text-rose-500 text-[10px] ml-1 hover:text-rose-400 transition">✕</button>
+                                        </div>
+                                    </td>
+                                    <td class="p-4 text-white font-bold" x-text="'$'+s.price"></td>
+                                    <td class="p-4 font-bold" :class="s.perf['1d'] > 0 ? 'text-emerald-500' : 'text-rose-500'" x-text="s.perf['1d']+'%'"></td>
+                                    <td class="p-4" :class="s.price > s.ma['50'] ? 'text-emerald-400' : 'text-rose-400'" x-text="'$' + s.ma['50']"></td>
+                                    <td class="p-4" :class="s.price > s.ma['100'] ? 'text-emerald-400' : 'text-rose-400'" x-text="'$' + s.ma['100']"></td>
+                                    <td class="p-4 font-bold" :class="s.price > s.ma['250'] ? 'text-emerald-400' : 'text-rose-400'" x-text="'$' + s.ma['250']"></td>
+                                    <td class="p-4" x-text="s.stats.beta"></td>
+                                    <td class="p-4" :class="s.perf['1m'] > 0 ? 'text-emerald-400' : 'text-rose-400'" x-text="s.perf['1m']+'%'"></td>
+                                    <td class="p-4" :class="s.perf['3m'] > 0 ? 'text-emerald-400' : 'text-rose-400'" x-text="s.perf['3m']+'%'"></td>
+                                    <td class="p-4" :class="s.perf['1y'] > 0 ? 'text-emerald-400' : 'text-rose-400'" x-text="s.perf['1y']+'%'"></td>
+                                    <td class="p-4 font-bold" :class="s.perf['3y'] > 0 ? 'text-emerald-400' : 'text-rose-400'" x-text="s.perf['3y']+'%'"></td>
+                                    <td class="p-4" x-text="s.stats.pe"></td>
+                                    <td class="p-4 font-bold" :class="s.stats.rsi > 70 ? 'text-rose-500' : (s.stats.rsi < 30 ? 'text-emerald-500' : 'text-slate-400')" x-text="s.stats.rsi"></td>
+                                    <td x-show="portfolioMode" class="p-4">
+                                        <div x-text="s.position.quantity > 0 ? s.position.quantity : '-'"></div>
+                                    </td>
+                                    <td x-show="portfolioMode" class="p-4 font-bold" :class="s.position.pnl > 0 ? 'text-emerald-500' : 'text-rose-500'" x-text="s.position.pnl != 0 ? (s.position.pnl > 0 ? '+' : '') + '$' + s.position.pnl.toLocaleString() : '-'"></td>
+                                    <td class="p-4 text-[10px]" x-text="s.stats.sector"></td>
+                                    <td class="p-4">
+                                        <span :class="s.sentiment === 'Bullish' ? 'text-emerald-400 border-emerald-400/20 bg-emerald-500/10' : 'text-rose-400 border-rose-400/20 bg-rose-500/10'" class="px-2 py-0.5 rounded border text-[8px] font-black uppercase" x-text="s.sentiment"></span>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- DEEP DIVE MODAL -->
+    <div x-show="showModal" x-cloak class="fixed inset-0 z-50 flex justify-end">
+        <div class="absolute inset-0 bg-black/80 backdrop-blur-sm" @click="showModal = false"></div>
+        <div class="relative w-full max-w-4xl bg-[#0b1120] border-l border-white/10 p-8 overflow-y-auto shadow-2xl" 
+             x-show="showModal" 
+             x-transition:enter="transition ease-out duration-300" 
+             x-transition:enter-start="translate-x-full" 
+             x-transition:enter-end="translate-x-0" 
+             x-transition:leave="transition ease-in duration-200" 
+             x-transition:leave-start="translate-x-0" 
+             x-transition:leave-end="translate-x-full">
+            
+            <!-- Header -->
+            <div class="flex justify-between items-start mb-6">
+                <div>
+                    <h2 class="text-5xl font-black text-white mb-2" x-text="activeStock.symbol"></h2>
+                    <div class="flex items-center gap-3">
+                        <span class="text-2xl font-bold text-slate-300" x-text="'$' + activeStock.price"></span>
+                        <span :class="activeStock.perf?.['1d'] > 0 ? 'text-emerald-400' : 'text-rose-400'" class="text-sm font-bold" x-text="activeStock.perf?.['1d'] + '%'"></span>
+                        <span class="text-xs text-slate-500" x-text="activeStock.stats?.sector"></span>
+                    </div>
+                </div>
+                <button @click="showModal = false" class="text-slate-500 hover:text-white text-3xl transition">✕</button>
+            </div>
+            
+            <!-- TradingView Chart -->
+            <div id="tv_chart" class="h-80 w-full rounded-2xl bg-black mb-6 border border-white/10 relative">
+                <div class="chart-overlay" x-show="chartLoading">Loading chart...</div>
+                <div class="absolute top-4 left-4 flex gap-2 z-10" x-show="activeStock.position?.quantity > 0">
+                    <div class="bg-emerald-500/20 border border-emerald-500/50 text-emerald-400 px-3 py-1 rounded text-xs font-bold backdrop-blur-sm">
+                        Position: <span x-text="activeStock.position.quantity"></span> @ $<span x-text="activeStock.position.avg_price"></span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Quick Stats Row with Earnings -->
+            <div class="grid grid-cols-5 gap-4 mb-6">
+                <div class="bg-white/5 rounded-xl p-4 border border-white/10 hover-lift">
+                    <div class="text-[10px] text-slate-500 uppercase mb-1">Market Cap</div>
+                    <div class="text-white font-bold" x-text="activeStock.stats?.market_cap || '—'"></div>
+                    <div class="text-[9px] text-slate-600 mt-1">Company Size</div>
+                </div>
+                <div class="bg-white/5 rounded-xl p-4 border border-white/10 hover-lift">
+                    <div class="text-[10px] text-slate-500 uppercase mb-1">52W Range</div>
+                    <div class="text-white font-bold text-xs" x-text="'$' + activeStock.stats?.['52w_low'] + ' - ' + activeStock.stats?.['52w_high']"></div>
+                    <div class="text-[9px] text-slate-600 mt-1">Annual Price Range</div>
+                </div>
+                <div class="bg-white/5 rounded-xl p-4 border border-white/10 hover-lift">
+                    <div class="text-[10px] text-slate-500 uppercase mb-1">Dividend Yield</div>
+                    <div class="text-white font-bold" x-text="activeStock.stats?.dividend_yield !== 0 ? activeStock.stats?.dividend_yield + '%' : '—'"></div>
+                    <div class="text-[9px] text-slate-600 mt-1">Annual Return %</div>
+                </div>
+                <div class="bg-white/5 rounded-xl p-4 border border-white/10 hover-lift">
+                    <div class="text-[10px] text-slate-500 uppercase mb-1">Volatility</div>
+                    <div class="text-white font-bold" x-text="activeStock.stats?.volatility !== '—' ? activeStock.stats?.volatility + '%' : '—'"></div>
+                    <div class="text-[9px] text-slate-600 mt-1">Price Swing Risk</div>
+                </div>
+                <div class="bg-gradient-to-br from-purple-500/20 to-blue-500/20 rounded-xl p-4 border-2 border-purple-500/50 hover-lift" x-show="activeStock.stats?.earnings">
+                    <div class="text-[10px] text-purple-300 uppercase mb-1 font-bold">⏰ Next Earnings</div>
+                    <div class="text-white font-bold text-sm" x-text="activeStock.stats?.earnings || '—'"></div>
+                    <div class="text-[9px] text-purple-300 mt-1">Report Date</div>
+                </div>
+            </div>
+
+            <!-- Metrics Guide Panel -->
+            <div class="mb-6 bg-gradient-to-r from-blue-500/10 to-purple-500/10 border border-blue-500/30 rounded-xl p-5">
+                <h3 class="text-blue-400 text-xs font-black uppercase mb-3">📊 Understanding Key Metrics</h3>
+                <div class="grid grid-cols-2 gap-4 text-xs">
+                    <div>
+                        <div class="font-bold text-white mb-2">Volatility:</div>
+                        <div class="text-slate-400 leading-relaxed">
+                            Measures how wildly the stock price swings.<br>
+                            <span class="text-emerald-400">• Low (5-15%)</span>: Stable, less risky<br>
+                            <span class="text-yellow-400">• Medium (15-25%)</span>: Moderate swings<br>
+                            <span class="text-rose-400">• High (25%+)</span>: Very unpredictable
+                        </div>
+                    </div>
+                    <div>
+                        <div class="font-bold text-white mb-2">Dividend Yield:</div>
+                        <div class="text-slate-400 leading-relaxed">
+                            Annual cash return as % of stock price.<br>
+                            <span class="text-slate-500">• 0%</span>: No dividends paid<br>
+                            <span class="text-emerald-400">• 2-4%</span>: Good income<br>
+                            <span class="text-emerald-500">• 4%+</span>: High income (check sustainability)
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Portfolio & Alerts -->
+            <div class="grid grid-cols-2 gap-6 mb-6">
+                <div class="bg-white/5 rounded-xl p-5 border border-white/10 hover-lift">
+                    <h3 class="text-blue-500 text-xs font-black uppercase mb-4">📊 Portfolio Tracker</h3>
+                    <div class="space-y-4">
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="text-[10px] text-slate-500 uppercase">Quantity</label>
+                                <input type="number" x-model="tempPosition.quantity" class="w-full bg-black/30 border border-white/10 rounded p-2 text-white text-sm mt-1 focus:border-blue-500 outline-none transition">
+                            </div>
+                            <div>
+                                <label class="text-[10px] text-slate-500 uppercase">Avg Buy ($)</label>
+                                <input type="number" step="0.01" x-model="tempPosition.avg_price" class="w-full bg-black/30 border border-white/10 rounded p-2 text-white text-sm mt-1 focus:border-blue-500 outline-none transition">
+                            </div>
+                        </div>
+                        <button @click="savePosition()" class="w-full bg-blue-600 hover:bg-blue-500 p-2 rounded text-white font-bold text-xs transition">Update Position</button>
+                        
+                        <div x-show="activeStock.position?.quantity > 0" class="mt-4 pt-4 border-t border-white/10">
+                            <div class="flex justify-between mb-2"><span class="text-xs text-slate-400">Current Value</span><span class="text-white font-bold" x-text="'$' + (activeStock.price * activeStock.position.quantity).toLocaleString()"></span></div>
+                            <div class="flex justify-between mb-2"><span class="text-xs text-slate-400">Cost Basis</span><span class="text-slate-300" x-text="'$' + (activeStock.position.avg_price * activeStock.position.quantity).toLocaleString()"></span></div>
+                            <div class="flex justify-between pt-2 border-t border-white/5">
+                                <span class="text-xs font-bold" :class="activeStock.position.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'">Total P&L</span>
+                                <span class="font-bold" :class="activeStock.position.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'" x-text="(activeStock.position.pnl >= 0 ? '+' : '') + '$' + activeStock.position.pnl.toLocaleString() + ' (' + activeStock.position.pnl_pct + '%)'"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="bg-white/5 rounded-xl p-5 border border-white/10 hover-lift">
+                    <h3 class="text-yellow-500 text-xs font-black uppercase mb-4">🔔 Price Alerts</h3>
+                    <div class="space-y-4">
+                        <div>
+                            <label class="text-[10px] text-slate-500 uppercase">Alert if Above ($)</label>
+                            <input type="number" step="0.01" x-model="tempAlerts.high" placeholder="e.g. 200.00" class="w-full bg-black/30 border border-white/10 rounded p-2 text-white text-sm mt-1 focus:border-yellow-500 outline-none transition">
+                        </div>
+                        <div>
+                            <label class="text-[10px] text-slate-500 uppercase">Alert if Below ($)</label>
+                            <input type="number" step="0.01" x-model="tempAlerts.low" placeholder="e.g. 150.00" class="w-full bg-black/30 border border-white/10 rounded p-2 text-white text-sm mt-1 focus:border-yellow-500 outline-none transition">
+                        </div>
+                        <button @click="saveAlerts()" class="w-full bg-yellow-600/20 hover:bg-yellow-600/30 border border-yellow-600/50 text-yellow-500 p-2 rounded font-bold text-xs transition">Set Alerts</button>
+                        
+                        <div x-show="activeStock.alerts?.high || activeStock.alerts?.low" class="mt-4 pt-4 border-t border-white/10 text-xs">
+                            <div x-show="activeStock.alerts?.high" class="text-slate-400 mb-1">Alert set: Above $<span x-text="activeStock.alerts?.high"></span></div>
+                            <div x-show="activeStock.alerts?.low" class="text-slate-400">Alert set: Below $<span x-text="activeStock.alerts?.low"></span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Notes Section -->
+            <div class="mb-6">
+                <div class="bg-white/5 rounded-xl p-5 border border-white/10 hover-lift">
+                    <h3 class="text-purple-500 text-xs font-black uppercase mb-4">📝 Personal Notes</h3>
+                    <textarea x-model="tempNotes" placeholder="Add your analysis, trading strategy, or reminders..." class="w-full bg-black/30 border border-white/10 rounded p-3 text-white text-sm h-24 focus:border-purple-500 outline-none transition resize-none"></textarea>
+                    <button @click="saveNotes()" class="mt-2 bg-purple-600/20 hover:bg-purple-600/30 border border-purple-600/50 text-purple-400 px-4 py-2 rounded font-bold text-xs transition">Save Notes</button>
+                </div>
+            </div>
+            
+            <!-- Company Description -->
+            <div class="mb-6">
+                <h3 class="text-blue-500 text-xs font-black uppercase mb-4">📈 Company Overview</h3>
+                <p class="text-slate-400 text-sm border-l-2 border-blue-500/20 pl-4 leading-relaxed" x-text="details.description || 'Loading company information...'"></p>
+            </div>
+
+            <!-- News Section -->
+            <div>
+                <h3 class="text-blue-500 text-xs font-black uppercase mb-4">📰 Latest News</h3>
+                <div class="space-y-3">
+                    <template x-for="(n, idx) in details.news" :key="idx">
+                        <a :href="n.link" target="_blank" class="block p-4 bg-white/5 rounded-xl hover:bg-blue-600/10 border border-white/5 transition hover-lift">
+                            <div class="flex gap-4">
+                                <img x-show="n.thumbnail" :src="n.thumbnail" class="news-thumbnail flex-shrink-0" @error="$el.style.display='none'">
+                                <div class="flex-1">
+                                    <span class="text-slate-200 text-sm block mb-2 leading-snug" x-text="n.title"></span>
+                                    <div class="flex items-center gap-3 text-[10px] text-slate-500">
+                                        <span x-text="n.publisher"></span>
+                                        <span>•</span>
+                                        <span x-text="n.published"></span>
+                                    </div>
+                                </div>
+                                <span class="text-blue-500 flex-shrink-0">→</span>
+                            </div>
+                        </a>
+                    </template>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function pulseApp() {
+            return {
+                stocks: [], 
+                categories: ['All'], 
+                filter: 'All', 
+                showModal: false, 
+                activeStock: {position: {}, stats: {}, perf: {}}, 
+                details: {news: [], description: ''}, 
+                newTicker: '', 
+                newCategory: 'Short Term', 
+                customCategory: '',
+                theme: 'dark', 
+                lastUpdate: '', 
+                portfolioMode: false,
+                loading: false,
+                chartLoading: false,
+                tempPosition: {quantity: 0, avg_price: 0}, 
+                tempAlerts: {high: null, low: null},
+                tempNotes: '',
+                sortColumn: '',
+                sortDirection: 'asc',
+                apiBase: window.location.origin,
+
+                get filteredStocks() { 
+                    let filtered = this.filter === 'All' ? this.stocks : this.stocks.filter(s => s.category === this.filter);
+                    return filtered;
+                },
+
+                get sortedStocks() {
+                    let stocks = [...this.filteredStocks];
+                    
+                    if (!this.sortColumn) {
+                        // Default: alerts first, then alphabetical
+                        return stocks.sort((a, b) => {
+                            if (a.alert_triggered && !b.alert_triggered) return -1;
+                            if (!a.alert_triggered && b.alert_triggered) return 1;
+                            return a.symbol.localeCompare(b.symbol);
+                        });
+                    }
+
+                    stocks.sort((a, b) => {
+                        let aVal, bVal;
+                        
+                        switch(this.sortColumn) {
+                            case 'symbol':
+                                aVal = a.symbol;
+                                bVal = b.symbol;
+                                break;
+                            case 'price':
+                                aVal = a.price;
+                                bVal = b.price;
+                                break;
+                            case '1d':
+                            case '1m':
+                            case '3m':
+                            case '1y':
+                            case '3y':
+                                aVal = a.perf[this.sortColumn];
+                                bVal = b.perf[this.sortColumn];
+                                break;
+                            case 'ma50':
+                                aVal = a.ma['50'];
+                                bVal = b.ma['50'];
+                                break;
+                            case 'ma100':
+                                aVal = a.ma['100'];
+                                bVal = b.ma['100'];
+                                break;
+                            case 'ma250':
+                                aVal = a.ma['250'];
+                                bVal = b.ma['250'];
+                                break;
+                            case 'pe':
+                                aVal = a.stats.pe;
+                                bVal = b.stats.pe;
+                                break;
+                            case 'rsi':
+                                aVal = a.stats.rsi;
+                                bVal = b.stats.rsi;
+                                break;
+                            case 'beta':
+                                aVal = a.stats.beta;
+                                bVal = b.stats.beta;
+                                break;
+                            default:
+                                return 0;
+                        }
+
+                        // Handle "—" values
+                        if (aVal === '—') aVal = -Infinity;
+                        if (bVal === '—') bVal = -Infinity;
+
+                        if (typeof aVal === 'string') {
+                            return this.sortDirection === 'asc' ? 
+                                aVal.localeCompare(bVal) : 
+                                bVal.localeCompare(aVal);
+                        } else {
+                            return this.sortDirection === 'asc' ? 
+                                aVal - bVal : 
+                                bVal - aVal;
+                        }
+                    });
+
+                    return stocks;
+                },
+
+                getCategoryCount(cat) {
+                    if (cat === 'All') return this.stocks.length;
+                    return this.stocks.filter(s => s.category === cat).length;
+                },
+
+                sortBy(column) {
+                    if (this.sortColumn === column) {
+                        this.sortDirection = this.sortDirection === 'asc' ? 'desc' : 'asc';
+                    } else {
+                        this.sortColumn = column;
+                        this.sortDirection = 'asc';
+                    }
+                },
+
+                async init() { 
+                    await this.loadTheme();
+                    await this.fetchCategories();
+                    await this.fetchData(); 
+                    setInterval(() => this.fetchData(), 60000);
+                },
+
+                async loadTheme() {
+                    try {
+                        const res = await fetch(this.apiBase + '/api/theme');
+                        const data = await res.json();
+                        this.theme = data.theme;
+                        if (this.theme === 'light') {
+                            document.documentElement.classList.remove('dark');
+                        }
+                    } catch (e) { this.theme = 'dark'; }
+                },
+
+                async toggleTheme() {
+                    this.theme = this.theme === 'dark' ? 'light' : 'dark';
+                    if (this.theme === 'light') {
+                        document.documentElement.classList.remove('dark');
+                    } else {
+                        document.documentElement.classList.add('dark');
+                    }
+                    await fetch(this.apiBase + '/api/theme', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ theme: this.theme })
+                    });
+                },
+
+                async fetchData() { 
+                    this.loading = true;
+                    try {
+                        const res = await fetch(this.apiBase + '/api/screener');
+                        this.stocks = await res.json();
+                        this.lastUpdate = new Date().toLocaleTimeString();
+                    } catch (e) { 
+                        console.error("API Error", e); 
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                async fetchCategories() {
+                    try {
+                        const res = await fetch(this.apiBase + '/api/categories');
+                        this.categories = await res.json();
+                    } catch (e) {}
+                },
+
+                async addTicker() {
+                    if(!this.newTicker) return;
+                    let cat = this.newCategory === '___new___' ? this.customCategory : this.newCategory;
+                    if(!cat) return alert('Enter category');
+                    try {
+                        const res = await fetch(this.apiBase + '/api/add', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({ symbol: this.newTicker.toUpperCase(), category: cat })
+                        });
+                        const result = await res.json();
+                        if(result.status === 'added') {
+                            this.newTicker = '';
+                            this.customCategory = '';
+                            this.newCategory = 'Short Term';
+                            await this.fetchCategories();
+                            await this.fetchData();
+                        } else if (result.status === 'exists') {
+                            alert('Stock already in watchlist!');
+                        }
+                    } catch (e) {
+                        console.error('Add ticker error:', e);
+                    }
+                },
+
+                async deleteTicker(symbol) {
+                    if(!confirm('Delete ' + symbol + ' from watchlist?')) return;
+                    try {
+                        console.log('Deleting:', symbol);
+                        const res = await fetch(this.apiBase + '/api/ticker/' + symbol, { 
+                            method: 'DELETE' 
+                        });
+                        const result = await res.json();
+                        console.log('Delete result:', result);
+                        
+                        if (result.status === 'deleted') {
+                            await this.fetchData();
+                            await this.fetchCategories();
+                            alert(symbol + ' removed successfully!');
+                        } else {
+                            alert('Failed to remove ' + symbol);
+                        }
+                    } catch (e) {
+                        console.error('Error deleting:', e);
+                        alert('Failed to remove stock');
+                    }
+                },
+
+                deleteCategory(cat) {
+                    if(!confirm('Delete category "' + cat + '" and all its stocks?')) return;
+                    this.stocks.filter(s => s.category === cat).forEach(t => this.deleteTicker(t.symbol));
+                },
+
+                async openDeepDive(s) {
+                    this.activeStock = s;
+                    this.tempPosition = { quantity: s.position?.quantity || 0, avg_price: s.position?.avg_price || 0 };
+                    this.tempAlerts = { high: s.alerts?.high || null, low: s.alerts?.low || null };
+                    this.tempNotes = s.notes || '';
+                    this.showModal = true;
+                    this.chartLoading = true;
+                    this.details = { description: 'Loading company information...', news: [] };
+                    
+                    document.getElementById('tv_chart').innerHTML = '';
+                    
+                    try {
+                        const res = await fetch(this.apiBase + '/api/details/' + s.symbol);
+                        this.details = await res.json();
+                        
+                        setTimeout(() => {
+                            try {
+                                new TradingView.widget({
+                                    "autosize": true,
+                                    "symbol": s.symbol,
+                                    "interval": "D",
+                                    "theme": this.theme,
+                                    "style": "1",
+                                    "container_id": "tv_chart",
+                                    "hide_top_toolbar": false,
+                                    "hide_legend": false,
+                                    "save_image": false,
+                                    "studies": ["RSI@tv-basicstudies", "MASimple@tv-basicstudies"]
+                                });
+                                this.chartLoading = false;
+                            } catch (e) {
+                                console.error('TradingView widget error:', e);
+                                this.chartLoading = false;
+                            }
+                        }, 300);
+                    } catch (e) {
+                        console.error('Error loading details:', e);
+                        this.details.description = 'Error loading company information';
+                        this.chartLoading = false;
+                    }
+                },
+
+                async savePosition() {
+                    try {
+                        console.log('Saving position:', this.tempPosition);
+                        const res = await fetch(this.apiBase + '/api/portfolio/' + this.activeStock.symbol, {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({
+                                quantity: parseFloat(this.tempPosition.quantity),
+                                avg_price: parseFloat(this.tempPosition.avg_price)
+                            })
+                        });
+                        const result = await res.json();
+                        console.log('Save result:', result);
+                        
+                        await this.fetchData();
+                        const updated = this.stocks.find(s => s.symbol === this.activeStock.symbol);
+                        if(updated) {
+                            this.activeStock = updated;
+                            this.tempPosition = { 
+                                quantity: updated.position?.quantity || 0, 
+                                avg_price: updated.position?.avg_price || 0 
+                            };
+                        }
+                        alert('Position saved successfully!');
+                    } catch (e) {
+                        console.error('Error saving position:', e);
+                        alert('Failed to save position');
+                    }
+                },
+
+                async saveAlerts() {
+                    try {
+                        console.log('Saving alerts:', this.tempAlerts);
+                        const res = await fetch(this.apiBase + '/api/alerts/' + this.activeStock.symbol, {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({
+                                high: this.tempAlerts.high ? parseFloat(this.tempAlerts.high) : null,
+                                low: this.tempAlerts.low ? parseFloat(this.tempAlerts.low) : null
+                            })
+                        });
+                        const result = await res.json();
+                        console.log('Alert result:', result);
+                        
+                        await this.fetchData();
+                        const updated = this.stocks.find(s => s.symbol === this.activeStock.symbol);
+                        if(updated) this.activeStock = updated;
+                        alert('Alerts saved successfully!');
+                    } catch (e) {
+                        console.error('Error saving alerts:', e);
+                        alert('Failed to save alerts');
+                    }
+                },
+
+                async saveNotes() {
+                    try {
+                        console.log('Saving notes:', this.tempNotes);
+                        const res = await fetch(this.apiBase + '/api/notes/' + this.activeStock.symbol, {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({ notes: this.tempNotes })
+                        });
+                        const result = await res.json();
+                        console.log('Notes result:', result);
+                        
+                        await this.fetchData();
+                        const updated = this.stocks.find(s => s.symbol === this.activeStock.symbol);
+                        if(updated) {
+                            this.activeStock = updated;
+                            this.tempNotes = updated.notes || '';
+                        }
+                        alert('Notes saved successfully!');
+                    } catch (e) {
+                        console.error('Error saving notes:', e);
+                        alert('Failed to save notes');
+                    }
+                },
+
+                async exportCSV() {
+                    const res = await fetch(this.apiBase + '/api/export');
+                    const data = await res.json();
+                    const blob = new Blob([data.csv], { type: 'text/csv' });
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    a.download = 'pulse_watchlist_' + new Date().toISOString().split('T')[0] + '.csv';
+                    a.click();
+                },
+
+                async importCSV(event) {
+                    const file = event.target.files[0];
+                    if(!file) return;
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    try {
+                        const res = await fetch(this.apiBase + '/api/import', { method: 'POST', body: formData });
+                        const data = await res.json();
+                        alert('Successfully imported ' + data.count + ' tickers!');
+                        await this.fetchData();
+                        await this.fetchCategories();
+                    } catch (e) {
+                        alert('Import failed. Please check the file format.');
+                        console.error('Import error:', e);
+                    }
+                    event.target.value = '';
+                }
+            }
+        }
+    </script>
+</body>
+</html>

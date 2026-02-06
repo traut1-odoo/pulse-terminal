@@ -1,0 +1,23 @@
+services:
+  # Web Service
+  - type: web
+    name: pulse-terminal
+    env: python
+    region: oregon
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main_cloud:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: DATABASE_URL
+        fromDatabase:
+          name: pulse-db
+          property: connectionString
+
+databases:
+  # PostgreSQL Database
+  - name: pulse-db
+    databaseName: pulse_terminal
+    user: pulse_user
+    plan: free
